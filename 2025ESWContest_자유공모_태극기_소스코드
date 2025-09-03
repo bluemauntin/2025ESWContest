@@ -1,0 +1,101 @@
+#include <DS1302.h>
+#include <Servo.h>   // 서보모터 라이브러리 추가
+
+Servo servo;        // 서보 객체 생성
+
+
+// DS1302 핀 설정
+const int CE = 12;   // RST
+const int IO = 13;   // DAT
+const int SCLK = 11; // CLK
+DS1302 rtc(CE, IO, SCLK);
+
+// --- L298N 핀 설정 ---
+const int ENA = 9;   
+const int IN1 = 5;
+const int IN2 = 6;
+
+// --- 버튼 핀 ---
+const int BTN_FWD = 7;
+const int BTN_REV = 8;
+
+// 모터 설정
+const int SPEED_PWM = 220;
+const unsigned long RUN_MS = 2000;
+
+// 상태
+bool running = false;
+unsigned long endAt = 0;
+
+// 버튼 상태
+int lastFwd = HIGH, lastRev = HIGH;
+
+// ---- 일출/일몰 (서울 기준, 고정) ----
+const int sunriseHour = 7;
+const int sunriseMin  = 0;
+const int sunsetHour  = 19;
+const int sunsetMin   = 0;
+
+// ---- 국기 게양일 ----
+struct Day { int month; int day; };
+Day flagDays[] = { {3,1},{7,17},{8,15},{10,3},{10,9} };
+const int NUM_FLAGDAYS = sizeof(flagDays)/sizeof(flagDays[0]);
+
+bool isFlagDay(int month, int day) {
+  for (int i=0; i<NUM_FLAGDAYS; i++)
+    if(flagDays[i].month == month && flagDays[i].day == day) return true;
+  return false;
+}
+
+void setup() {
+  Serial.begin(9600);
+  // 서보 모터 초기화
+  servo.attach(2);   // 2번 핀 연결
+  servo.write(5);    // 초기 위치: 닫힘
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENA, OUTPUT);
+
+  pinMode(BTN_FWD, INPUT_PULLUP);
+  pinMode(BTN_REV, INPUT_PULLUP);
+
+  stopMotor();
+}
+
+void loop() {
+  // 현재 시간 읽기
+  Time t = rtc.getTime();
+
+  // 국기 게양일 자동 제어
+  if(isFlagDay(t.mon, t.date)) {
+    if(t.hour == sunriseHour && t.min == sunriseMin && !running) startMotor(+1);
+    if(t.hour == sunsetHour  && t.min == sunsetMin  && !running) startMotor(-1);
+  }
+
+  // 버튼 수동 제어
+  int fwd = digitalRead(BTN_FWD);
+  int rev = digitalRead(BTN_REV);
+  if(!running) {
+    if(lastFwd == HIGH && fwd == LOW) startMotor(+1);
+    if(lastRev == HIGH && rev == LOW) startMotor(-1);
+  }
+  lastFwd = fwd;
+  lastRev = rev;
+
+  // 모터 정지
+  if(running && millis() >= endAt) stopMotor();
+}
+
+void startMotor(int dir) {
+  if(dir>0){ digitalWrite(IN1,HIGH); digitalWrite(IN2,LOW); }
+  else    { digitalWrite(IN1,LOW); digitalWrite(IN2,HIGH); }
+  analogWrite(ENA,SPEED_PWM);
+  running=true;
+  endAt=millis()+RUN_MS;
+}
+
+void stopMotor() {
+  digitalWrite(IN1,LOW); digitalWrite(IN2,LOW);
+  analogWrite(ENA,0);
+  running=false;
+}
